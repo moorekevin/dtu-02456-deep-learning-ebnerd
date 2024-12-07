@@ -3,7 +3,6 @@ import polars as pl
 import numpy as np
 
 from ebrec.models.newsrec.dataloader import (
-    LSTURDataLoader,
     NRMSDataLoader,
 )
 from ebrec.utils._behaviors import create_user_id_to_int_mapping
@@ -22,7 +21,6 @@ from ebrec.utils._constants import (
     DEFAULT_USER_COL,
 )
 
-from ebrec.models.fastformer.dataloader import FastformerDataset
 from torch.utils.data import DataLoader
 
 N_ITERATIONS = 300
@@ -92,59 +90,5 @@ def bomb_NRMSDataLoader():
     iter_dataloader(dataloader, "NRMS-test", iterations=N_ITERATIONS)
 
 
-@time_it(True)
-def bomb_LSTURDataLoader():
-    user_mapping = create_user_id_to_int_mapping(df=df_behaviors_train)
-
-    dataloader = LSTURDataLoader(
-        behaviors=df_behaviors_train,
-        article_dict=article_mapping,
-        user_id_mapping=user_mapping,
-        history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
-        unknown_representation="zeros",
-        batch_size=BATCH_SIZE,
-    )
-    iter_dataloader(dataloader, "LSTUR-train", iterations=N_ITERATIONS)
-
-    dataloader = LSTURDataLoader(
-        behaviors=df_behaviors,
-        article_dict=article_mapping,
-        user_id_mapping=user_mapping,
-        history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
-        unknown_representation="zeros",
-        batch_size=BATCH_SIZE,
-        eval_mode=True,
-    )
-    iter_dataloader(dataloader, "LSTUR-test", iterations=N_ITERATIONS)
-
-
-# ===
-@time_it(True)
-def bomb_FastformerDataLoader():
-    dataloader = DataLoader(
-        FastformerDataset(
-            behaviors=df_behaviors_train,
-            history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
-            article_dict=article_mapping,
-            batch_size=BATCH_SIZE,
-            shuffle=True,
-        )
-    )
-    iter_dataloader(dataloader, "Fastformer-train", iterations=N_ITERATIONS)
-
-    dataloader = DataLoader(
-        FastformerDataset(
-            behaviors=df_behaviors,
-            history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
-            article_dict=article_mapping,
-            batch_size=BATCH_SIZE,
-            shuffle=False,
-        )
-    )
-    iter_dataloader(dataloader, "Fastformer-test", iterations=N_ITERATIONS)
-
-
 if __name__ == "__main__":
     bomb_NRMSDataLoader()
-    bomb_LSTURDataLoader()
-    bomb_FastformerDataLoader()
