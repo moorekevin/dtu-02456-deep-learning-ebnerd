@@ -22,7 +22,6 @@ from ebrec.utils._constants import (
     DEFAULT_USER_COL,
 )
 
-from ebrec.models.fastformer.dataloader import FastformerDataset
 from torch.utils.data import DataLoader
 
 TOKEN_COL = "tokens"
