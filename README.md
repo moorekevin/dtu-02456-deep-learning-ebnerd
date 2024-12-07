@@ -48,17 +48,17 @@ tensorflow-macos; sys_platform == 'darwin'
 
 # Modifications
 
-- REMOVED models/fastformer
+- REMOVED
+
+  - models/fastformer
+  - [Neural Recommendation with Long- and Short-term User Representations](https://aclanthology.org/P19-1033/) (LSTUR)
+  - [Neural Recommendation with Personalized Attention](https://arxiv.org/abs/1907.05559) (NPA)
+  - [Neural Recommendation with Attentive Multi-View Learning](https://arxiv.org/abs/1907.05576) (NAML)
 
 - KEPT:
 
   - [Neural Recommendation with Multi-Head Self-Attention](https://aclanthology.org/D19-1671/) (NRMS).
     The source code originates from the brilliant RS repository, [recommenders](https://github.com/recommenders-team/recommenders). We have simply stripped it of all non-model-related code.
-
-- NOT USED:
-  - [Neural Recommendation with Long- and Short-term User Representations](https://aclanthology.org/P19-1033/) (LSTUR)
-  - [Neural Recommendation with Personalized Attention](https://arxiv.org/abs/1907.05559) (NPA)
-  - [Neural Recommendation with Attentive Multi-View Learning](https://arxiv.org/abs/1907.05576) (NAML)
 
 # Notebooks
 
