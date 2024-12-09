@@ -430,7 +430,7 @@ print("Hyperparameters:", hparams)
 
 
 # Data loading
-PATH = Path("~/Git Repositories/ebnerd-benchmark/data").expanduser()
+PATH = Path("~/dtu/blackhole/17/155575/dtu-02456-dl-ebnerd/data").expanduser()
 DATASPLIT = "ebnerd_small"
 
 # Load and process training data
