@@ -21,7 +21,7 @@ import sys
 import os
 
 # Add the parent directory to sys.path
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
 sys.path.append(root_dir)
 print(sys.path)
 # In[18]:
