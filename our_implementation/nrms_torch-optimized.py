@@ -430,7 +430,7 @@ print("Hyperparameters:", hparams)
 
 
 # Data loading
-PATH = Path("../data").resolve()
+PATH = Path("./data").resolve()
 DATASPLIT = "ebnerd_small"
 
 # Load and process training data
