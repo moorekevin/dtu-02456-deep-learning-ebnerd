@@ -22,6 +22,7 @@ import os
 
 # Add the parent directory to sys.path
 sys.path.append(os.path.abspath(".."))
+print(sys.path)
 # In[18]:
 
 
