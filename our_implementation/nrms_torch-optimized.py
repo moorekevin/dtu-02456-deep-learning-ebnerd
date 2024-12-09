@@ -17,7 +17,11 @@
 # 7.  Evaluation on Test Set: Evaluate the trained model.
 
 # ## Imports
+import sys
+import os
 
+# Add the parent directory to sys.path
+sys.path.append(os.path.abspath(".."))
 # In[18]:
 
 
