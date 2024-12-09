@@ -430,7 +430,7 @@ print("Hyperparameters:", hparams)
 
 
 # Data loading
-PATH = Path("~/dtu-02456-dl-ebnerd/data").expanduser()
+PATH = Path("~/$BLACKHOLE/dtu-02456-dl-ebnerd/data").expanduser()
 DATASPLIT = "ebnerd_small"
 
 # Load and process training data
