@@ -1,6 +1,5 @@
 import datetime
 import os
-from pathlib import Path
 from tqdm import tqdm
 
 import numpy as np
@@ -37,11 +36,6 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 
 
-# ## Hyperparameters
-
-# In[37]:
-
-
 class HParams:
     title_size = 30
     head_num = 16
@@ -50,11 +44,10 @@ class HParams:
     dropout = 0.2
     batch_size = 32
     verbose = False
-    data_fraction = 1  # Fraction of data to use
-    sampling_nratio = (
-        # For every positive sample ( a click ), we sample X negative samples
-        4
-    )
+    # Fraction of data to use
+    data_fraction = 1
+    # For every positive sample ( a click ), we sample X negative samples
+    sampling_nratio = 4
     # History of each users interactions will be limited to the most recent X articles
     history_size = 20
     epochs = 1
@@ -78,10 +71,6 @@ class HParams:
 
 
 # ## Defining Model
-
-# In[38]:
-
-
 class SelfAttention(nn.Module):
     def __init__(self, hparams, verbose=False):
         super().__init__()
@@ -200,12 +189,9 @@ class NRMSModel(nn.Module):
         return scores
 
 
-# ## Helper functions
+# Helper functions
 
-# ### Loading Data Helper Function
-
-# In[49]:
-
+# Loading Data Helper Function
 
 class NRMSDataset(Dataset):
     def __init__(
@@ -217,15 +203,6 @@ class NRMSDataset(Dataset):
         candidate_column,
         verbose=False,
     ):
-        """
-        Args:
-                                                                                                                                        df (pl.DataFrame): DataFrame containing raw history and candidate article IDs.
-                                                                                                                                        article_mapping (dict): Mapping of article IDs to tokenized representations.
-                                                                                                                                        title_size (int): Maximum size of title tokens for padding/truncation.
-                                                                                                                                        history_column (str): Column containing user history.
-                                                                                                                                        candidate_column (str): Column containing candidate articles.
-                                                                                                                                        verbose (bool): If True, prints debug information.
-        """
         self.history_raw = df[history_column].to_list()
         self.candidates_raw = df[candidate_column].to_list()
         self.labels = df["labels"].to_list()
@@ -349,8 +326,6 @@ def prepare_df_for_training(df):
 # ### Training Helper Function
 # 1. Optimizer: Adam
 # 2. Loss Function: Cross Entropy
-
-# In[50]:
 def prepare_training_data(hparams, PATH, DATASPLIT):
     df_train = (
         ebnerd_from_path(
