@@ -351,6 +351,53 @@ def prepare_df_for_training(df):
 # 2. Loss Function: Cross Entropy
 
 # In[50]:
+def prepare_training_data(hparams, PATH, DATASPLIT):
+    df_train = (
+        ebnerd_from_path(
+            PATH.joinpath(DATASPLIT, "train"),
+            history_size=hparams.history_size,
+            padding=0,
+        )
+        .pipe(
+            sampling_strategy_wu2019,
+            npratio=hparams.sampling_nratio,
+            with_replacement=True,
+            seed=SEED,
+        )
+        .pipe(create_binary_labels_column)
+        .sample(fraction=hparams.data_fraction)
+    )
+
+# Split into train/validation
+    dt_split = df_train[DEFAULT_IMPRESSION_TIMESTAMP_COL].max(
+    ) - datetime.timedelta(days=1)
+    df_train_split = df_train.filter(
+        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) < dt_split)
+    df_validation = df_train.filter(
+        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) >= dt_split)
+
+# Load articles and prepare embeddings
+    df_articles = pl.read_parquet(PATH.joinpath("articles.parquet"))
+    transformer_model = AutoModel.from_pretrained(
+        hparams.transformer_model_name)
+    transformer_tokenizer = AutoTokenizer.from_pretrained(
+        hparams.transformer_model_name)
+    word_embeddings = transformer_model.get_input_embeddings().weight.detach().numpy()
+
+# Prepare article embeddings
+    df_articles, cat_col = concat_str_columns(
+        df_articles, columns=["subtitle", "title"])
+    df_articles, token_col_title = convert_text2encoding_with_transformers(
+        df_articles,
+        transformer_tokenizer,
+        cat_col,
+        max_length=hparams.title_size
+    )
+    article_mapping = create_article_id_to_value_mapping(
+        df=df_articles,
+        value_col=token_col_title
+    )
+    return df_train_split, df_validation, article_mapping, word_embeddings
 
 
 def train_and_evaluate(
@@ -451,3 +498,29 @@ def train_and_evaluate(
                 break
 
     return model
+
+
+def evaluate_model(model, dataloader, device):
+    model.eval()
+    all_scores = []
+    all_labels = []
+    with torch.no_grad():
+        for batch in dataloader:
+            his_input = batch['history'].to(device)
+            pred_input = batch['candidates'].to(device)
+            labels = batch['labels']
+            masks = batch['candidate_masks']
+
+            scores = model(his_input, pred_input)
+            valid_scores = scores[masks.bool()].cpu().numpy()
+            valid_labels = labels[masks.bool()].numpy()
+            all_scores.extend(valid_scores)
+            all_labels.extend(valid_labels)
+
+    all_scores = np.array(all_scores)
+    all_labels = np.array(all_labels)
+
+    metrics = {
+        'auc': roc_auc_score(all_labels, all_scores),
+    }
+    return metrics
