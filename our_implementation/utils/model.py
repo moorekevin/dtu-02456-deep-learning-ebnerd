@@ -397,7 +397,28 @@ def prepare_training_data(hparams, PATH, DATASPLIT):
         df=df_articles,
         value_col=token_col_title
     )
-    return df_train_split, df_validation, article_mapping, word_embeddings
+
+    # Validate DataFrames
+    df_train_split = prepare_df_for_training(df_train_split)
+    df_validation = prepare_df_for_training(df_validation)
+
+    # Create DataLoaders
+    train_loader = create_dataloader(
+        df_train_split, article_mapping, hparams.title_size,
+        batch_size=hparams.batch_size,
+        history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
+        candidate_column=DEFAULT_INVIEW_ARTICLES_COL,
+        shuffle=True
+    )
+
+    val_loader = create_dataloader(
+        df_validation, article_mapping, hparams.title_size,
+        batch_size=hparams.batch_size,
+        history_column=DEFAULT_HISTORY_ARTICLE_ID_COL,
+        candidate_column=DEFAULT_INVIEW_ARTICLES_COL,
+        shuffle=False
+    )
+    return train_loader, val_loader, word_embeddings
 
 
 def train_and_evaluate(
