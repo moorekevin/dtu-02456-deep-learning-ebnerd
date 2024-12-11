@@ -38,8 +38,8 @@ np.random.seed(SEED)
 
 class HParams:
     title_size = 30
-    head_num = 16
-    head_dim = 16
+    head_num = 20
+    head_dim = 20
     attention_hidden_dim = 200
     dropout = 0.2
     batch_size = 32
