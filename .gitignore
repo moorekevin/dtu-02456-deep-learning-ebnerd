@@ -33,5 +33,4 @@ downloads.py
 # Our custom .gitignore
 data/
 repomix-output.txt
-.repomixignore
 /our_implementation/checkpoints

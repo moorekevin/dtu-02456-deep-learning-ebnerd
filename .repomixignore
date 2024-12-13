@@ -1,0 +1,17 @@
+**/*.md
+**/*.parquet
+LICENSE
+
+examples/reproducibility_scripts/**/*
+
+our_implementation/nrms_torch_test.ipynb
+
+examples/quick_start/ebnerd_predictions/**/*
+examples/quick_start/nrms_docvec_dummy.py
+examples/quick_start/datasets/**/*
+
+test/**/*
+
+src/ebrec/models/newsrec/nrms_docvec.py
+data/
+build/
