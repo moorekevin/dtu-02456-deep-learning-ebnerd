@@ -321,12 +321,26 @@ def train_model(
     best_val_auc = 0
     patience_counter = 0
 
+    # Create a unique directory for checkpoints based on the current ISO date-time
+    timestamp = datetime.datetime.now().isoformat(
+        timespec="seconds").replace(":", "-")
+    checkpoint_dir = os.path.join("checkpoints", timestamp)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    # Save hyperparameters and device info to info.txt
+    info_path = os.path.join(checkpoint_dir, "info.txt")
+    with open(info_path, "w") as info_file:
+        info_file.write(f"Training Timestamp: {timestamp}\n")
+        info_file.write(f"Device: {device}\n")
+        info_file.write(f"Hyperparameters:\n{hparams}\n")
+    print(f"Training information saved to: {info_path}")
+
     for epoch in range(hparams.epochs):
         # Training
         model.train()
         total_loss = 0
         with tqdm(
-            total=len(train_loader), desc=f"Epoch {epoch+1}/{hparams.epochs}", unit="batch"
+            total=len(train_loader), desc=f"Epoch {epoch+1}/{hparams.epochs}", unit="batch", dynamic_ncols=True
         ) as pbar:
             for batch in train_loader:
                 his_input = batch["history"].to(device)
@@ -353,7 +367,7 @@ def train_model(
         all_labels = []
         with (
             torch.no_grad(),
-            tqdm(total=len(val_loader), desc="Validation", unit="batch") as pbar,
+            tqdm(total=len(val_loader), desc="Validation", unit="batch",  dynamic_ncols=True) as pbar,
         ):
             for batch in val_loader:
                 his_input = batch["history"].to(device)
@@ -380,10 +394,7 @@ def train_model(
         )
         best_val_auc = max(best_val_auc, val_auc)
 
-        checkpoint_dir = "checkpoints"
-        # Ensure the directory exists
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        checkpoint_path = f"checkpoints/nrms_checkpoint_{epoch+1}.pth"
+        checkpoint_path = f"{checkpoint_dir}/nrms_checkpoint_{epoch+1}.pth"
         torch.save(
             {
                 "epoch": epoch + 1,
@@ -415,7 +426,7 @@ def evaluate_model(model, dataloader, device):
     all_labels = []
     with (
             torch.no_grad(),
-            tqdm(total=len(dataloader), desc="Testing", unit="batch") as pbar
+            tqdm(total=len(dataloader), desc="Testing", unit="batch", dynamic_ncols=True) as pbar
     ):
         for batch in dataloader:
             his_input = batch['history'].to(device)
