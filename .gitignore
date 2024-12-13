@@ -33,3 +33,4 @@ downloads.py
 # Our custom .gitignore
 data/
 repomix-output.txt
+our_implementation/data.zip
