@@ -17,7 +17,7 @@
 # ## 1. Importing Dependencies
 # Import all necessary libraries and modules, including `utils.model` and `utils.helper` for the NRMS model, data preparation, training, and evaluation.
 
-# In[1]:
+# In[11]:
 
 
 import sys
@@ -26,7 +26,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false" # to avoid warnings in transforme
 from pathlib import Path
 # Get the current directory
 current_dir = os.getcwd()
-root_dir = os.path.dirname(os.path.dirname(current_dir))
+root_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "dtu-02456-deep-learning-ebnerd")
 src_dir = os.path.join(root_dir, "src")
 # Append the relative path to the utils folder and ebrec src
 sys.path.append(os.path.join(current_dir, "utils"))
