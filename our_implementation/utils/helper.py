@@ -35,6 +35,15 @@ SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
+COLUMNS = [
+    DEFAULT_USER_COL,
+    DEFAULT_IMPRESSION_ID_COL,
+    DEFAULT_IMPRESSION_TIMESTAMP_COL,
+    DEFAULT_HISTORY_ARTICLE_ID_COL,
+    DEFAULT_CLICKED_ARTICLES_COL,
+    DEFAULT_INVIEW_ARTICLES_COL,
+]
+
 
 class HParams:
     title_size = 30
@@ -222,11 +231,7 @@ def load_articles_and_embeddings(hparams, PATH):
 # ### Training Helper Function
 # 1. Optimizer: Adam
 # 2. Loss Function: Cross Entropy
-def prepare_training_data(hparams, PATH, DATASPLIT):
-    # Get article mapping and word embeddings
-    article_mapping, word_embeddings = load_articles_and_embeddings(
-        hparams, PATH)
-
+def prepare_training_data(hparams, PATH, DATASPLIT, article_mapping):
     # Load and sample training data
     df_train = (
         ebnerd_from_path(
@@ -234,6 +239,7 @@ def prepare_training_data(hparams, PATH, DATASPLIT):
             history_size=hparams.history_size,
             padding=0,
         )
+        .select(COLUMNS)
         .pipe(
             sampling_strategy_wu2019,
             npratio=hparams.sampling_nratio,
@@ -252,7 +258,7 @@ def prepare_training_data(hparams, PATH, DATASPLIT):
     df_validation = df_train.filter(
         pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) >= dt_split)
 
-    # Validate DataFrames
+    # # -> Validate DataFrames
     df_train_split = validate_df_col(df_train_split)
     df_validation = validate_df_col(df_validation)
 
@@ -270,10 +276,40 @@ def prepare_training_data(hparams, PATH, DATASPLIT):
     )
     val_loader = val_dataset.get_dataloader(hparams.batch_size, shuffle=False)
 
-    return train_loader, val_loader, word_embeddings
+    print(
+        f" -> Train samples: {df_train.height}\n -> Validation samples: {df_validation.height}")
+
+    return train_loader, val_loader
 
 
-def train_and_evaluate(
+def prepare_test_data(hparams, PATH, DATASPLIT, article_mapping):
+    # Load test data directly from the validation directory (unseen data)
+    df_test = (
+        ebnerd_from_path(
+            PATH.joinpath(DATASPLIT, "validation"),
+            history_size=hparams.history_size,
+            padding=0,
+        )
+        .select(COLUMNS)
+        .pipe(create_binary_labels_column)
+        .sample(fraction=hparams.data_fraction)
+    )
+
+    # Validate DataFrame
+    df_test = validate_df_col(df_test)
+
+    # Create Validation Dataset and Dataloader
+    test_dataset = NRMSDataset(
+        df_test, article_mapping, hparams.title_size
+    )
+    test_loader = test_dataset.get_dataloader(
+        hparams.batch_size, shuffle=False)
+    print(
+        f" -> Testing samples: {df_test.height}")
+    return test_loader
+
+
+def train_model(
     device, model, train_loader, val_loader, hparams, patience=3
 ):
     model = model.to(device)
@@ -377,7 +413,10 @@ def evaluate_model(model, dataloader, device):
     model.eval()
     all_scores = []
     all_labels = []
-    with torch.no_grad():
+    with (
+            torch.no_grad(),
+            tqdm(total=len(dataloader), desc="Testing", unit="batch") as pbar
+    ):
         for batch in dataloader:
             his_input = batch['history'].to(device)
             pred_input = batch['candidates'].to(device)
@@ -389,6 +428,7 @@ def evaluate_model(model, dataloader, device):
             valid_labels = labels[masks.bool()].numpy()
             all_scores.extend(valid_scores)
             all_labels.extend(valid_labels)
+            pbar.update(1)
 
     all_scores = np.array(all_scores)
     all_labels = np.array(all_labels)
