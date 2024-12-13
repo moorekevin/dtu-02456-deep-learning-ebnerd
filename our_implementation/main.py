@@ -26,10 +26,11 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false" # to avoid warnings in transforme
 from pathlib import Path
 # Get the current directory
 current_dir = os.getcwd()
-
-# Append the relative path to the utils folder
+root_dir = os.path.dirname(os.path.dirname(current_dir))
+src_dir = os.path.join(root_dir, "src")
+# Append the relative path to the utils folder and ebrec src
 sys.path.append(os.path.join(current_dir, "utils"))
-
+sys.path.append(src_dir)
 from importlib import reload
 
 import torch
@@ -68,11 +69,11 @@ hparams.batch_size = 32
 # 2. Loading **training** data and splitting it to training/validation (from `{datasplit}/train`)
 # 3. Loading **testing** data for final evaluation (from `{datasplit}/validation`)
 
-# In[3]:
+# In[ ]:
 
 
 PATH = Path(os.path.join(current_dir, "data"))
-DATASPLIT = "ebnerd_small"
+DATASPLIT = "ebnerd_large"
 print("Loading data from ", PATH, "with datasplit:", DATASPLIT)
 
 # Loading articles and embeddings
