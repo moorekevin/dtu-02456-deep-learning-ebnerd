@@ -28,6 +28,7 @@ from ebrec.utils._constants import (
     DEFAULT_CLICKED_ARTICLES_COL,
     DEFAULT_INVIEW_ARTICLES_COL,
     DEFAULT_ARTICLE_ID_COL,
+    DEFAULT_ARTICLE_PUBLISHED_TIMESTAMP_COL
 )
 
 # Set random seed
@@ -86,18 +87,25 @@ class HParams:
 
 
 def nrms_collate_fn(batch):
-    histories, candidates, labels = zip(*batch)
+    histories, histories_time, candidates, candidates_time, labels = zip(
+        *batch)
     max_candidates = max([cand.size(0) for cand in candidates])
 
     padded_candidates = []
+    padded_candidates_time = []
     candidate_masks = []
-    for cand in candidates:
+    for cand, cand_time in zip(candidates, candidates_time):
         num_cands = cand.size(0)
         if num_cands < max_candidates:
             pad_size = max_candidates - num_cands
             padded_cand = torch.cat(
                 [cand, torch.zeros(pad_size, cand.size(1), dtype=torch.long)]
             )
+
+            padded_time = torch.cat(
+                [cand_time, torch.zeros(pad_size, dtype=torch.float32)]
+            )
+
             mask = torch.cat(
                 [
                     torch.ones(num_cands, dtype=torch.bool),
@@ -106,13 +114,17 @@ def nrms_collate_fn(batch):
             )
         else:
             padded_cand = cand[:max_candidates]
+            padded_time = cand_time[:max_candidates]
             mask = torch.ones(max_candidates, dtype=torch.bool)
         padded_candidates.append(padded_cand)
+        padded_candidates_time.append(padded_time)
         candidate_masks.append(mask)
 
     padded_candidates = torch.stack(padded_candidates)
+    padded_candidates_time = torch.stack(padded_candidates_time)
     candidate_masks = torch.stack(candidate_masks)
     histories = torch.stack(histories)
+    histories_time = torch.stack(histories_time)
 
     padded_labels = []
     for label in labels:
@@ -129,7 +141,9 @@ def nrms_collate_fn(batch):
 
     return {
         "history": histories,
+        "history_time": histories_time,
         "candidates": padded_candidates,
+        "candidates_time": padded_candidates_time,
         "labels": padded_labels,
         "candidate_masks": candidate_masks,
     }
@@ -151,6 +165,26 @@ class NRMSDataset(Dataset):
         self.article_mapping = article_mapping
         self.title_size = title_size
         self.verbose = verbose
+        # Day before first day of data collection (april 26th)
+        self.reference_time = datetime.datetime(2023, 4, 26)
+
+        self.days_since_reference = [
+            self.datetime_to_days_since_reference(article["timepublished"])
+            for article in article_mapping.values()
+        ]
+
+        # Step 2: Compute mean and standard deviation
+        self.mean_days = np.mean(self.days_since_reference)
+        self.std_days = np.std(self.days_since_reference)
+
+    def datetime_to_days_since_reference(self, dt):
+        """Convert datetime to days since the reference time."""
+        return (dt - self.reference_time).total_seconds() / 86400  # Convert to days
+
+    def standardize_time(self, dt):
+        """Standardize time based on precomputed mean and std."""
+        days_since_ref = self.datetime_to_days_since_reference(dt)
+        return (days_since_ref - self.mean_days) / self.std_days
 
     def __len__(self):
         return len(self.labels)
@@ -158,17 +192,38 @@ class NRMSDataset(Dataset):
     def __getitem__(self, idx):
         # Convert article IDs to tokenized representations
         history_tokens = [
-            self.article_mapping.get(aid, [0] * self.title_size)
+            self.article_mapping.get(aid, {"tokens": [
+                                     0] * self.title_size, "timepublished": self.reference_time})["tokens"]
             for aid in self.history_raw[idx]
         ]
+
+        history_timepublished = [
+            self.standardize_time(
+                self.article_mapping.get(aid, {"tokens": [0] * self.title_size, "timepublished": self.reference_time})[
+                    "timepublished"]
+            )
+            for aid in self.history_raw[idx]
+        ]
+
         candidate_tokens = [
-            self.article_mapping.get(aid, [0] * self.title_size)
+            self.article_mapping.get(aid, {"tokens": [
+                                     0] * self.title_size, "timepublished": self.reference_time})["tokens"]
+            for aid in self.candidates_raw[idx]
+        ]
+
+        candidate_timepublished = [
+            self.standardize_time(
+                self.article_mapping.get(aid, {"tokens": [0] * self.title_size, "timepublished": self.reference_time})[
+                    "timepublished"]
+            )
             for aid in self.candidates_raw[idx]
         ]
 
         # Convert to PyTorch tensors
         his_ids = torch.tensor(history_tokens, dtype=torch.long)
+        his_time = torch.tensor(history_timepublished, dtype=torch.float32)
         pred_ids = torch.tensor(candidate_tokens, dtype=torch.long)
+        pred_time = torch.tensor(candidate_timepublished, dtype=torch.float32)
         y = torch.tensor(self.labels[idx], dtype=torch.float32)
 
         if self.verbose:
@@ -176,7 +231,7 @@ class NRMSDataset(Dataset):
             print(f"Candidate Tokens: {pred_ids.shape}")
             print(f"Label: {y.shape}")
 
-        return his_ids, pred_ids, y
+        return his_ids, his_time, pred_ids, pred_time, y
 
     def get_dataloader(self, batch_size, shuffle):
         return DataLoader(
@@ -217,9 +272,19 @@ def load_articles_and_embeddings(hparams, PATH):
         df_articles, transformer_tokenizer, cat_col, max_length=hparams.title_size
     )
     # # -> Create article mapping
-    df_mapping = df_articles.select(DEFAULT_ARTICLE_ID_COL, token_col_title)
-    article_mapping = dict(
-        zip(df_mapping[DEFAULT_ARTICLE_ID_COL], df_mapping[token_col_title]))
+    df_mapping = df_articles.select(
+        DEFAULT_ARTICLE_ID_COL, token_col_title, DEFAULT_ARTICLE_PUBLISHED_TIMESTAMP_COL)
+    article_mapping = {
+        article_id: {
+            "tokens": token,
+            "timepublished": time_published
+        }
+        for article_id, token, time_published in zip(
+            df_mapping[DEFAULT_ARTICLE_ID_COL],
+            df_mapping[token_col_title],
+            df_mapping[DEFAULT_ARTICLE_PUBLISHED_TIMESTAMP_COL]
+        )
+    }
     # Load Transformer Model and get word embeddings
     transformer_model = AutoModel.from_pretrained(
         hparams.transformer_model_name)
@@ -344,12 +409,14 @@ def train_model(
         ) as pbar:
             for batch in train_loader:
                 his_input = batch["history"].to(device)
+                his_time = batch["history_time"].to(device)
                 pred_input = batch["candidates"].to(device)
+                pred_time = batch["candidates_time"].to(device)
                 labels = batch["labels"].to(device)
                 masks = batch["candidate_masks"].to(device)
 
                 optimizer.zero_grad()
-                scores = model(his_input, pred_input)
+                scores = model(his_input, his_time, pred_input, pred_time)
                 scores = scores * masks
                 loss = criterion(scores, labels)
 
@@ -371,11 +438,13 @@ def train_model(
         ):
             for batch in val_loader:
                 his_input = batch["history"].to(device)
+                his_time = batch["history_time"].to(device)
                 pred_input = batch["candidates"].to(device)
+                pred_time = batch["candidates_time"].to(device)
                 labels = batch["labels"]
                 masks = batch["candidate_masks"]
 
-                scores = model(his_input, pred_input)
+                scores = model(his_input, his_time, pred_input, pred_time)
                 scores = scores * masks
                 loss = criterion(scores, labels.to(device))
                 val_loss += loss.item()
@@ -429,12 +498,14 @@ def evaluate_model(model, dataloader, device):
             tqdm(total=len(dataloader), desc="Testing", unit="batch", dynamic_ncols=True) as pbar
     ):
         for batch in dataloader:
-            his_input = batch['history'].to(device)
-            pred_input = batch['candidates'].to(device)
-            labels = batch['labels']
-            masks = batch['candidate_masks']
+            his_input = batch["history"].to(device)
+            his_time = batch["history_time"].to(device)
+            pred_input = batch["candidates"].to(device)
+            pred_time = batch["candidates_time"].to(device)
+            labels = batch["labels"]
+            masks = batch["candidate_masks"]
 
-            scores = model(his_input, pred_input)
+            scores = model(his_input, his_time, pred_input, pred_time)
             valid_scores = scores[masks.bool()].cpu().numpy()
             valid_labels = labels[masks.bool()].numpy()
             all_scores.extend(valid_scores)

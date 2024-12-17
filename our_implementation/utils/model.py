@@ -90,6 +90,9 @@ class NRMSModel(nn.Module):
         self.embedding = nn.Embedding.from_pretrained(
             torch.FloatTensor(word_embeddings), freeze=False
         )
+        # Shape: (N_total, 1) -> (N_total, 768)
+        self.time_embedding = nn.Linear(1, hparams.head_num * hparams.head_dim)
+
         self.dropout = nn.Dropout(hparams.dropout)
 
         # News Encoder
@@ -100,28 +103,44 @@ class NRMSModel(nn.Module):
         self.user_self_att = SelfAttention(hparams, verbose=hparams.verbose)
         self.user_att = AdditiveAttention(hparams, verbose=hparams.verbose)
 
-    def encode_news(self, news_input):
-        x = self.embedding(news_input)
+    def encode_news(self, news_input, news_time=None):
+        verbose = False
+        # Step 1: Token-level Embeddings and Attention
+        x = self.embedding(news_input)  # Shape: (N_total, L_tokens, D)
         x = self.dropout(x)
-        x = self.news_self_att(x, x, x)  # x is Q, K, V
+        x = self.news_self_att(x, x, x)  # Self-attention over tokens
+        # Aggregate into single vector per article -> Shape: (N_total, D)
         x = self.news_att(x)
+        if verbose:
+            print(f"news_input shape: {news_input.shape}")
+            print(f"news_time shape: {news_time.shape}")
+            print(f"x shape: {x.shape}")
+        # Step 2: Add Time Embedding at the Article Level
+        if news_time is not None:
+            # news_time shape: (batch_size * num_items)
+            news_time = news_time.view(-1, 1)  # Shape: (N_total, 1)
+            time_emb = self.time_embedding(news_time)  # Shape: (N_total, D)
+            x = x + time_emb  # Add time embedding to article vector
         return x
 
-    def encode_user(self, history_input):
+    def encode_user(self, history_input, history_time=None):
         N, H, L = history_input.size()
         history_input = history_input.view(N * H, L)
-        news_vectors = self.encode_news(history_input)
+        history_time = history_time.view(-1,
+                                         1) if history_time is not None else None
+
+        news_vectors = self.encode_news(history_input, history_time)
         news_vectors = news_vectors.view(N, H, -1)
         user_vector = self.user_self_att(
             news_vectors, news_vectors, news_vectors)
         user_vector = self.user_att(user_vector)
         return user_vector
 
-    def forward(self, his_input, pred_input):
-        user_vector = self.encode_user(his_input)
+    def forward(self, his_input, his_time, pred_input, pred_time):
+        user_vector = self.encode_user(his_input, his_time)
         N, M, L = pred_input.size()
         pred_input = pred_input.view(N * M, L)
-        news_vectors = self.encode_news(pred_input)
+        news_vectors = self.encode_news(pred_input, pred_time)
         news_vectors = news_vectors.view(N, M, -1)
         scores = torch.bmm(news_vectors, user_vector.unsqueeze(2)).squeeze(-1)
         return scores
