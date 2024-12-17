@@ -219,7 +219,7 @@ def load_articles_and_embeddings(hparams, PATH):
     )
     # # -> Create article mapping
     article_mapping = create_lookup_dict(
-        df_articles.select(DEFAULT_ARTICLE_ID_COL, token_col_title), key=DEFAULT_ARTICLE_ID_COL, value=token_col_title
+        df=df_articles.select(DEFAULT_ARTICLE_ID_COL, token_col_title), key=DEFAULT_ARTICLE_ID_COL, value=token_col_title
     )
     # Load Transformer Model and get word embeddings
     transformer_model = AutoModel.from_pretrained(
