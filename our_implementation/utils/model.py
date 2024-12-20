@@ -9,23 +9,18 @@ np.random.seed(SEED)
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, hparams, verbose=False):
+    def __init__(self, hparams, embedding_dim, verbose=False):
         super().__init__()
         self.head_num = hparams.head_num
         self.head_dim = hparams.head_dim
         self.output_dim = self.head_num * self.head_dim
-        self.WQ = self.WK = self.WV = None
+        self.WQ = nn.Linear(embedding_dim, self.output_dim)
+        self.WK = nn.Linear(embedding_dim, self.output_dim)
+        self.WV = nn.Linear(embedding_dim, self.output_dim)
         self.dropout = nn.Dropout(hparams.dropout)
         self.verbose = verbose
 
     def forward(self, Q_seq, K_seq, V_seq):
-        # Lazy initialization of the weights
-        if self.WQ is None:
-            embedding_dim = Q_seq.size(-1)
-            self.WQ = nn.Linear(embedding_dim, self.output_dim)
-            self.WK = nn.Linear(embedding_dim, self.output_dim)
-            self.WV = nn.Linear(embedding_dim, self.output_dim)
-
         Q = self.WQ(Q_seq)
         K = self.WK(K_seq)
         V = self.WV(V_seq)
@@ -87,6 +82,7 @@ class AdditiveAttention(nn.Module):
 class NRMSModel(nn.Module):
     def __init__(self, hparams, word_embeddings):
         super().__init__()
+        embedding_dim = word_embeddings.shape[1]
         self.embedding = nn.Embedding.from_pretrained(
             torch.FloatTensor(word_embeddings), freeze=False
         )
@@ -100,11 +96,13 @@ class NRMSModel(nn.Module):
         self.dropout = nn.Dropout(hparams.dropout)
 
         # News Encoder
-        self.news_self_att = SelfAttention(hparams, verbose=hparams.verbose)
+        self.news_self_att = SelfAttention(
+            hparams, embedding_dim=embedding_dim, verbose=hparams.verbose)
         self.news_att = AdditiveAttention(hparams, verbose=hparams.verbose)
 
         # User Encoder
-        self.user_self_att = SelfAttention(hparams, verbose=hparams.verbose)
+        self.user_self_att = SelfAttention(hparams, embedding_dim=(
+            hparams.head_num*hparams.head_dim), verbose=hparams.verbose)
         self.user_att = AdditiveAttention(hparams, verbose=hparams.verbose)
 
     def encode_news(self, news_input, news_time=None):
