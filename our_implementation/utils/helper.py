@@ -1,7 +1,7 @@
 import datetime
 import os
 from tqdm import tqdm
-
+import json
 import numpy as np
 import polars as pl
 import torch
@@ -47,22 +47,40 @@ COLUMNS = [
 
 
 class HParams:
-    title_size = 30
-    head_num = 20
-    head_dim = 20
-    attention_hidden_dim = 200
-    dropout = 0.2
-    batch_size = 32
-    verbose = False
-    # Fraction of data to use
-    data_fraction = 1
-    # For every positive sample ( a click ), we sample X negative samples
-    sampling_nratio = 4
-    # History of each users interactions will be limited to the most recent X articles
-    history_size = 20
-    epochs = 1
-    lr = 1e-3
-    transformer_model_name = "facebookai/xlm-roberta-base"
+    def __init__(
+        self,
+        title_size=30,
+        head_num=20,
+        head_dim=20,
+        attention_hidden_dim=200,
+        dropout=0.2,
+        batch_size=32,
+        verbose=False,
+        # Fraction of data to use
+        data_fraction=1,
+        # For every positive sample ( a click ), we sample X negative samples
+        sampling_nratio=4,
+        # History of each users interactions will be limited to the most recent X articles
+        history_size=20,
+        epochs=1,
+        lr=1e-3,
+        datasplit="ebnerd_small",
+        transformer_model_name="facebookai/xlm-roberta-base"
+    ):
+        self.title_size = title_size
+        self.head_num = head_num
+        self.head_dim = head_dim
+        self.attention_hidden_dim = attention_hidden_dim
+        self.dropout = dropout
+        self.batch_size = batch_size
+        self.verbose = verbose
+        self.data_fraction = data_fraction
+        self.sampling_nratio = sampling_nratio
+        self.history_size = history_size
+        self.epochs = epochs
+        self.lr = lr
+        self.datasplit = datasplit
+        self.transformer_model_name = transformer_model_name
 
     def __str__(self):
         return (
@@ -371,11 +389,52 @@ def prepare_test_data(hparams, PATH, DATASPLIT, article_mapping):
         hparams.batch_size, shuffle=False)
     print(
         f" -> Testing samples: {df_test.height}")
-    return test_loader
+    return test_loader, df_test
+
+
+def save_hparams(device, hparams):
+    # Create a unique directory for checkpoints based on the current ISO date-time
+    timestamp = datetime.datetime.now().isoformat(
+        timespec="seconds").replace(":", "-")
+    checkpoint_dir = os.path.join("checkpoints", timestamp)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    def hparams_to_dict(hparams_class):
+        return {key: value for key, value in vars(hparams_class).items()}
+
+    hparams_dict = hparams_to_dict(hparams)
+
+    # Save to JSON
+    info_path = os.path.join(checkpoint_dir, "info.json")
+    info_data = {
+        "Training Timestamp": timestamp,
+        "Device": str(device),
+        "Hyperparameters": hparams_dict,
+    }
+    with open(info_path, "w") as json_file:
+        json.dump(info_data, json_file, indent=4)  # Pretty-print with indent=4
+
+    print(f"Training information saved to: {checkpoint_dir}")
+    return checkpoint_dir
+
+
+def save_checkpoint(checkpoint_dir, epoch, model, optimizer, avg_val_loss, val_auc):
+    checkpoint_path = f"{checkpoint_dir}/nrms_checkpoint_{epoch+1}.pth"
+    torch.save(
+        {
+            "epoch": epoch + 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "loss": avg_val_loss,
+            "auc": val_auc,
+        },
+        checkpoint_path,
+    )
+    print(f"Checkpoint saved to: {checkpoint_path}")
 
 
 def train_model(
-    device, model, train_loader, val_loader, hparams, patience=3
+    device, model, train_loader, val_loader, hparams, patience=3, checkpoint_dir=None
 ):
     model = model.to(device)
 
@@ -385,20 +444,6 @@ def train_model(
     best_val_loss = float("inf")
     best_val_auc = 0
     patience_counter = 0
-
-    # Create a unique directory for checkpoints based on the current ISO date-time
-    timestamp = datetime.datetime.now().isoformat(
-        timespec="seconds").replace(":", "-")
-    checkpoint_dir = os.path.join("checkpoints", timestamp)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-
-    # Save hyperparameters and device info to info.txt
-    info_path = os.path.join(checkpoint_dir, "info.txt")
-    with open(info_path, "w") as info_file:
-        info_file.write(f"Training Timestamp: {timestamp}\n")
-        info_file.write(f"Device: {device}\n")
-        info_file.write(f"Hyperparameters:\n{hparams}\n")
-    print(f"Training information saved to: {info_path}")
 
     for epoch in range(hparams.epochs):
         # Training
@@ -463,18 +508,8 @@ def train_model(
         )
         best_val_auc = max(best_val_auc, val_auc)
 
-        checkpoint_path = f"{checkpoint_dir}/nrms_checkpoint_{epoch+1}.pth"
-        torch.save(
-            {
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "loss": avg_val_loss,
-                "auc": val_auc,
-            },
-            checkpoint_path,
-        )
-        print(f"Checkpoint saved to: {checkpoint_path}")
+        save_checkpoint(checkpoint_dir, epoch, model,
+                        optimizer, avg_val_loss, val_auc)
 
         # Early stopping
         if avg_val_loss < best_val_loss:
@@ -519,3 +554,37 @@ def evaluate_model(model, dataloader, device):
         'auc': roc_auc_score(all_labels, all_scores),
     }
     return metrics
+
+
+def predict_scores(model, dataloader, device):
+    model.eval()
+    all_scores = []
+    all_labels = []
+    with (
+            torch.no_grad(),
+            tqdm(total=len(dataloader), desc="Testing", unit="batch", dynamic_ncols=True) as pbar
+    ):
+        for batch in dataloader:
+            his_input = batch["history"].to(device)
+            his_time = batch["history_time"].to(device)
+            pred_input = batch["candidates"].to(device)
+            pred_time = batch["candidates_time"].to(device)
+            labels = batch["labels"].to(device)
+            masks = batch["candidate_masks"]
+
+            # Model predictions (logits to probabilities)
+            scores = model(his_input, his_time, pred_input, pred_time)
+            scores = torch.sigmoid(scores)  # Convert logits to probabilities
+
+            # Group valid scores and labels by user
+            for score_row, label_row, mask_row in zip(
+                scores.cpu().numpy(), labels.cpu().numpy(), masks.cpu().numpy()
+            ):
+                valid_scores = score_row[mask_row.astype(bool)]
+                valid_labels = label_row[mask_row.astype(bool)]
+                all_scores.append(valid_scores.tolist())
+                all_labels.append(valid_labels.tolist())
+
+            pbar.update(1)
+
+    return all_scores, all_labels

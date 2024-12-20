@@ -91,7 +91,11 @@ class NRMSModel(nn.Module):
             torch.FloatTensor(word_embeddings), freeze=False
         )
         # Shape: (N_total, 1) -> (N_total, 768)
-        self.time_embedding = nn.Linear(1, hparams.head_num * hparams.head_dim)
+        self.time_embedding = nn.Linear(
+            1, hparams.head_num * hparams.head_dim // 2)
+
+        self.combine_proj = nn.Linear(hparams.head_num * hparams.head_dim +
+                                      hparams.head_num * hparams.head_dim // 2, hparams.head_num * hparams.head_dim)
 
         self.dropout = nn.Dropout(hparams.dropout)
 
@@ -115,12 +119,14 @@ class NRMSModel(nn.Module):
             print(f"news_input shape: {news_input.shape}")
             print(f"news_time shape: {news_time.shape}")
             print(f"x shape: {x.shape}")
-        # Step 2: Add Time Embedding at the Article Level
+        # Step 2: Time Embedding at the Article Level
         if news_time is not None:
-            # news_time shape: (batch_size * num_items)
+            # Shape: (batch_size * num_items)
             news_time = news_time.view(-1, 1)  # Shape: (N_total, 1)
-            time_emb = self.time_embedding(news_time)  # Shape: (N_total, D)
-            x = x + time_emb  # Add time embedding to article vector
+            time_emb = self.time_embedding(news_time)  # Shape: (N_total, 4)
+            time_emb = torch.tanh(time_emb)  # non-linearity
+            x = torch.cat([x, time_emb], dim=-1)  # Concatenate
+            x = self.combine_proj(x)  # Project back to (N_total, D)
         return x
 
     def encode_user(self, history_input, history_time=None):
