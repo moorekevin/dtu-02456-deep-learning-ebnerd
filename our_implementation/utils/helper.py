@@ -28,7 +28,9 @@ from ebrec.utils._constants import (
     DEFAULT_CLICKED_ARTICLES_COL,
     DEFAULT_INVIEW_ARTICLES_COL,
     DEFAULT_ARTICLE_ID_COL,
-    DEFAULT_ARTICLE_PUBLISHED_TIMESTAMP_COL
+    DEFAULT_ARTICLE_PUBLISHED_TIMESTAMP_COL,
+    DEFAULT_IS_BEYOND_ACCURACY_COL,
+    DEFAULT_LABELS_COL
 )
 
 # Set random seed
@@ -150,7 +152,7 @@ def nrms_collate_fn(batch):
         if num_cands < max_candidates:
             pad_size = max_candidates - num_cands
             padded_label = torch.cat(
-                [label, torch.zeros(pad_size, dtype=torch.float32)]
+                [label, torch.zeros(pad_size, dtype=torch.long)]
             )
         else:
             padded_label = label[:max_candidates]
@@ -242,7 +244,7 @@ class NRMSDataset(Dataset):
         his_time = torch.tensor(history_timepublished, dtype=torch.float32)
         pred_ids = torch.tensor(candidate_tokens, dtype=torch.long)
         pred_time = torch.tensor(candidate_timepublished, dtype=torch.float32)
-        y = torch.tensor(self.labels[idx], dtype=torch.float32)
+        y = torch.tensor(self.labels[idx], dtype=torch.long)
 
         if self.verbose:
             print(f"History Tokens: {his_ids.shape}")
@@ -251,12 +253,13 @@ class NRMSDataset(Dataset):
 
         return his_ids, his_time, pred_ids, pred_time, y
 
-    def get_dataloader(self, batch_size, shuffle):
+    def get_dataloader(self, batch_size, num_workers=2):
+        print(f"Using {num_workers} workers for dataloading")
         return DataLoader(
             self,
             batch_size,
-            shuffle,
             collate_fn=nrms_collate_fn,
+            num_workers=num_workers,
         )
 
 
@@ -316,80 +319,68 @@ def load_articles_and_embeddings(hparams, PATH):
 # 2. Loss Function: Cross Entropy
 def prepare_training_data(hparams, PATH, DATASPLIT, article_mapping):
     # Load and sample training data
-    df_train = (
+    df = (
         ebnerd_from_path(
             PATH.joinpath(DATASPLIT, "train"),
             history_size=hparams.history_size,
             padding=0,
         )
+        # pl.concat(
+        #     [
+        #         ebnerd_from_path(
+        #             PATH.joinpath(DATASPLIT, "train"),
+        #             history_size=hparams.history_size,
+        #             padding=0,
+        #         ),
+        #         ebnerd_from_path(
+        #             PATH.joinpath(DATASPLIT, "validation"),
+        #             history_size=hparams.history_size,
+        #             padding=0,
+        #         ),
+        #     ]
+        # )
+        .sample(fraction=hparams.data_fraction)
         .select(COLUMNS)
         .pipe(
             sampling_strategy_wu2019,
             npratio=hparams.sampling_nratio,
+            shuffle=True,
             with_replacement=True,
             seed=SEED,
         )
         .pipe(create_binary_labels_column)
-        .sample(fraction=hparams.data_fraction)
     )
 
     # Split into train/validation (last day is validation)
-    dt_split = df_train[DEFAULT_IMPRESSION_TIMESTAMP_COL].max(
+    last_day = df[DEFAULT_IMPRESSION_TIMESTAMP_COL].max(
     ) - datetime.timedelta(days=1)
-    df_train_split = df_train.filter(
-        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) < dt_split)
-    df_validation = df_train.filter(
-        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) >= dt_split)
+    df_train = df.filter(
+        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) < last_day)
+    df_validation = df.filter(
+        pl.col(DEFAULT_IMPRESSION_TIMESTAMP_COL) >= last_day)
 
     # # -> Validate DataFrames
-    df_train_split = validate_df_col(df_train_split)
+    df_train = validate_df_col(df_train)
     df_validation = validate_df_col(df_validation)
 
     # Create DataLoaders
     # # -> Training
     train_dataset = NRMSDataset(
-        df_train_split, article_mapping, hparams.title_size
+        df_train, article_mapping, hparams.title_size
     )
     train_loader = train_dataset.get_dataloader(
-        hparams.batch_size, shuffle=True)
+        hparams.batch_size)
 
     # # -> Validation
     val_dataset = NRMSDataset(
         df_validation, article_mapping, hparams.title_size
     )
-    val_loader = val_dataset.get_dataloader(hparams.batch_size, shuffle=False)
+    val_loader = val_dataset.get_dataloader(hparams.batch_size)
 
     print(
         f" -> Train samples: {df_train.height}\n -> Validation samples: {df_validation.height}")
 
     return train_loader, val_loader
-
-
-def prepare_test_data(hparams, PATH, DATASPLIT, article_mapping):
-    # Load test data directly from the validation directory (unseen data)
-    df_test = (
-        ebnerd_from_path(
-            PATH.joinpath(DATASPLIT, "validation"),
-            history_size=hparams.history_size,
-            padding=0,
-        )
-        .select(COLUMNS)
-        .pipe(create_binary_labels_column)
-        .sample(fraction=hparams.data_fraction)
-    )
-
-    # Validate DataFrame
-    df_test = validate_df_col(df_test)
-
-    # Create Validation Dataset and Dataloader
-    test_dataset = NRMSDataset(
-        df_test, article_mapping, hparams.title_size
-    )
-    test_loader = test_dataset.get_dataloader(
-        hparams.batch_size, shuffle=False)
-    print(
-        f" -> Testing samples: {df_test.height}")
-    return test_loader, df_test
 
 
 def save_hparams(device, hparams):
@@ -438,7 +429,7 @@ def train_model(
 ):
     model = model.to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.Adam(model.parameters(), lr=hparams.lr)
 
     best_val_loss = float("inf")
@@ -486,16 +477,17 @@ def train_model(
                 his_time = batch["history_time"].to(device)
                 pred_input = batch["candidates"].to(device)
                 pred_time = batch["candidates_time"].to(device)
-                labels = batch["labels"]
-                masks = batch["candidate_masks"]
+                labels = batch["labels"].to(device)
+                masks = batch["candidate_masks"].to(device)
 
                 scores = model(his_input, his_time, pred_input, pred_time)
                 scores = scores * masks
                 loss = criterion(scores, labels.to(device))
                 val_loss += loss.item()
 
-                valid_scores = scores[masks.bool()].cpu().numpy()
-                valid_labels = labels[masks.bool()].numpy()
+                valid_scores = scores[masks.bool()].detach().cpu().numpy()
+                valid_labels = labels.to(
+                    device)[masks.bool()].detach().cpu().numpy()
                 all_scores.extend(valid_scores)
                 all_labels.extend(valid_labels)
                 pbar.update(1)
@@ -537,12 +529,13 @@ def evaluate_model(model, dataloader, device):
             his_time = batch["history_time"].to(device)
             pred_input = batch["candidates"].to(device)
             pred_time = batch["candidates_time"].to(device)
-            labels = batch["labels"]
-            masks = batch["candidate_masks"]
+            labels = batch["labels"].to(device)
+            masks = batch["candidate_masks"].to(device)
 
             scores = model(his_input, his_time, pred_input, pred_time)
-            valid_scores = scores[masks.bool()].cpu().numpy()
-            valid_labels = labels[masks.bool()].numpy()
+            valid_scores = scores[masks.bool()].detach().cpu().numpy()
+            valid_labels = labels.to(
+                device)[masks.bool()].detach().cpu().numpy()
             all_scores.extend(valid_scores)
             all_labels.extend(valid_labels)
             pbar.update(1)
@@ -570,7 +563,7 @@ def predict_scores(model, dataloader, device):
             pred_input = batch["candidates"].to(device)
             pred_time = batch["candidates_time"].to(device)
             labels = batch["labels"].to(device)
-            masks = batch["candidate_masks"]
+            masks = batch["candidate_masks"].to(device)
 
             # Model predictions (logits to probabilities)
             scores = model(his_input, his_time, pred_input, pred_time)
