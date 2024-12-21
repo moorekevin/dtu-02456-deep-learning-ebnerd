@@ -244,7 +244,7 @@ class NRMSDataset(Dataset):
         his_time = torch.tensor(history_timepublished, dtype=torch.float32)
         pred_ids = torch.tensor(candidate_tokens, dtype=torch.long)
         pred_time = torch.tensor(candidate_timepublished, dtype=torch.float32)
-        y = torch.tensor(self.labels[idx], dtype=torch.long)
+        y = torch.tensor(self.labels[idx], dtype=torch.float32)
 
         if self.verbose:
             print(f"History Tokens: {his_ids.shape}")

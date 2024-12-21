@@ -10,7 +10,7 @@ from utils.helper import COLUMNS, NRMSDataset
 import polars as pl
 
 
-def prepare_validation_data(hparams, PATH, DATASPLIT, article_mapping, validation_data_fraction=1):
+def prepare_validation_data(hparams, PATH, DATASPLIT, article_mapping):
     df_validation = (
         ebnerd_from_path(
             PATH.joinpath(DATASPLIT, "validation"),
@@ -19,7 +19,7 @@ def prepare_validation_data(hparams, PATH, DATASPLIT, article_mapping, validatio
         )
         .select(COLUMNS)
         .pipe(create_binary_labels_column)
-        .sample(fraction=validation_data_fraction)
+        .sample(fraction=hparams.data_fraction)
     )
 
     val_dataset = NRMSDataset(
